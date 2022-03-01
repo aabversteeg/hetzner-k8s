@@ -1,0 +1,6 @@
+.inventory.ini
+.env
+.terraform*
+terraform.tfstate*
+
+.venv/

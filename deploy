@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+
+set -e
+
+docker-compose run terraform
+docker-compose run kubespray
+docker-compose run ansible

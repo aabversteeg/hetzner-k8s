@@ -1,0 +1,158 @@
+---
+- hosts: kube-master
+  run_once: true
+  tasks:
+      - name: Update repositories cache and apt install
+        apt:
+            update_cache: yes
+            name:
+                - pip
+                - snapd
+
+      - name: Install helm
+        snap:
+            name: helm
+            classic: yes
+
+      - name: Install Kubernetes python package
+        pip:
+            name: kubernetes
+
+      - name: Add helm repo
+        kubernetes.core.helm_repository:
+            name: haproxytech
+            repo_url: https://haproxytech.github.io/helm-charts
+
+      - name: Create ingress-controller namespace
+        kubernetes.core.k8s:
+            name: ingress-controller
+            api_version: v1
+            kind: Namespace
+            state: present
+
+      # https://github.com/haproxytech/helm-charts/blob/main/kubernetes-ingress/values.yaml
+      - name: Deploy HAProxy chart
+        kubernetes.core.helm:
+            name: haproxy-ingress
+            chart_ref: haproxytech/kubernetes-ingress
+            release_namespace: ingress-controller
+            values:
+                controller:
+                    kind: DaemonSet
+                    ingressClass: haproxy
+                    defaultTLSSecret:
+                        enabled: false
+                    service:
+                        type: NodePort
+                        annotations:
+                            haproxy.org/forwarded-for: "false"
+                        nodePorts:
+                            http: 31080
+                            https: 31443
+                            stat: 31024
+
+      - name: Create ingress
+        kubernetes.core.k8s:
+            state: present
+            namespace: ingress-controller
+            definition:
+                apiVersion: v1
+                kind: Ingress
+                metadata:
+                    name: echo
+                    annotations:
+                        haproxy.org/path-rewrite: null
+                        # haproxy-ingress.github.io/forwardfor: ignore
+                        haproxy.org/forwarded-for: "false"
+                        kubernetes.io/ingress.class: haproxy
+                spec:
+                    rules:
+                        - http:
+                              paths:
+                                  - path: /echo
+                                    pathType: Prefix
+                                    backend:
+                                        service:
+                                            name: echo
+                                            port:
+                                                number: 8080
+
+      - name: Deploy app pod
+        kubernetes.core.k8s:
+            state: present
+            namespace: ingress-controller
+            definition:
+                apiVersion: apps/v1
+                kind: Deployment
+                metadata:
+                    labels:
+                        run: echo
+                    name: echo
+                spec:
+                    replicas: 3
+                    selector:
+                        matchLabels:
+                            run: echo
+                    template:
+                        metadata:
+                            labels:
+                                run: echo
+                        spec:
+                            containers:
+                                - name: echo
+                                  image: jmalloc/echo-server
+                                  ports:
+                                      - containerPort: 8080
+                                  readinessProbe:
+                                      httpGet:
+                                          path: /
+                                          port: 8080
+                                      initialDelaySeconds: 5
+                                      periodSeconds: 5
+                                      successThreshold: 1
+
+      - name: Expose app
+        kubernetes.core.k8s:
+            state: present
+            namespace: ingress-controller
+            definition:
+                apiVersion: v1
+                kind: Service
+                metadata:
+                    name: echo
+                spec:
+                    selector:
+                        run: echo
+                    ports:
+                        - name: http
+                          protocol: TCP
+                          port: 8080
+                          targetPort: 8080
+
+      ###################### ArgoCD ######################
+
+      - name: Create ArgoCD namespace
+        kubernetes.core.k8s:
+            name: argocd
+            api_version: v1
+            kind: Namespace
+            state: present
+
+      - name: Add ArgoCD helm repo
+        kubernetes.core.helm_repository:
+            name: argo
+            # https://github.com/argoproj/argo-helm/tree/master/charts/argo-cd
+            repo_url: https://argoproj.github.io/argo-helm
+
+      - name: Deploy HAProxy chart
+        kubernetes.core.helm:
+            name: argocd
+            chart_ref: argo/argo-cd
+            release_namespace: argocd
+            values:
+                server:
+                    extraArgs:
+                        - --insecure
+                    ingress:
+                        enabled: true
+                        ingressClassName: haproxy

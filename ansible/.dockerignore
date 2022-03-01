@@ -1,0 +1,7 @@
+**
+
+!poetry.lock
+!pyproject.toml
+!requirements.yml
+!ansible.cfg
+!playbook.yml

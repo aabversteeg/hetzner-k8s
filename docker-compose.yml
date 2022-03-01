@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  
+  terraform:
+    build: ./terraform
+    volumes:
+      - .:/app:rw
+      - $SSH_DIRECTORY/id_rsa.pub:/root/.ssh/id_rsa.pub:ro
+    environment:
+      TF_VAR_num_nodes: $NUM_NODES
+      TF_VAR_hcloud_token: $HCLOUD_TOKEN
+      TF_VAR_whitelisted_cidrs: $WHITELISTED_CIDRS
+      TF_VAR_external_fqdn: $FQDN
+    command: apply -auto-approve
+
+  kubespray:
+    image: quay.io/kubespray/kubespray:v2.17.1
+    volumes:
+      - .:/app:ro
+      - $SSH_DIRECTORY/id_rsa:/root/.ssh/id_rsa:ro
+    command: ansible-playbook -i /app/.inventory.ini cluster.yml
+
+  ansible:
+    build: ./ansible
+    volumes:
+      - .:/app:ro
+      - $SSH_DIRECTORY/id_rsa:/root/.ssh/id_rsa:ro
+      - ./ansible.cfg:/etc/ansible/ansible.cfg:ro
